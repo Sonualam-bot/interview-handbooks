@@ -8,6 +8,71 @@ JavaScript before execution.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### Why a Syntax Extension Instead of Plain `createElement()` Calls
+
+You could write every UI in raw `createElement` calls — React does
+not require JSX. But nested UI expressed as nested function calls
+becomes unreadable fast:
+
+``` js
+createElement('div', null,
+  createElement('h1', null, 'Title'),
+  createElement('p', null, 'Body'))
+```
+
+JSX exists purely so the *shape* of the code visually matches the
+*shape* of the UI tree it describes. It buys nothing at runtime —
+it's a compile-time convenience that disappears entirely before the
+browser ever sees it.
+
+### Why Expressions Only, Never Statements
+
+`{}` in JSX is a slot for a single JavaScript **value** — because
+under the hood, everything inside becomes an *argument* to a function
+call (`jsx(type, props)`). A function argument must evaluate to a
+value; `if`, `for`, and `switch` don't evaluate to anything, they
+*execute*. That's not a React rule bolted on — it's a direct
+consequence of JSX compiling to function calls, which is why `if` has
+to be pulled out above `return` as a statement, while ternaries,
+`&&`, and function calls all work inline (see Conditional Rendering).
+
+### Why Exactly One Root Element
+
+A component function returns one value. `jsx()` calls compose into a
+single nested object graph — there's no way to "return two objects"
+from one function call without wrapping them in something. A
+`Fragment` (`<>...</>`) is that wrapper: it's a real element type that
+produces no DOM node of its own, existing solely so multiple siblings
+can be handed back as one value.
+
+### Traced Example: What the Compiler Actually Produces
+
+``` jsx
+function Greeting({ name }) {
+  return <h1>Hello, {name}!</h1>;
+}
+```
+
+compiles to roughly:
+
+``` js
+function Greeting({ name }) {
+  return jsx('h1', { children: ['Hello, ', name, '!'] });
+}
+```
+
+`{name}` was evaluated by plain JavaScript *before* `jsx()` was ever
+called — React never sees the expression `{name}`, only its already-
+computed result. This is the real mechanism behind "JavaScript
+evaluates expressions before React creates React Elements": there is
+no other order possible, because `{name}` is just an argument being
+passed into a function call, and arguments are always evaluated
+before the call executes.
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

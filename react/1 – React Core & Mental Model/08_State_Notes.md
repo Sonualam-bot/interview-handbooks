@@ -7,6 +7,73 @@ and trigger a re-render.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### Why State Can't Just Be a Local Variable
+
+A local variable (`let count = 0`) inside a function is
+re-initialized every time the function runs — and a component
+function *does* run again on every render (that's how `UI = f(state)`
+works). If React stored nothing outside the function call, no value
+could survive from one render to the next. So state, definitionally,
+has to live somewhere that outlives a single execution of the
+component function: on the fiber node, not in the function's local
+scope.
+
+### Where useState Actually Stores Things
+
+Each fiber keeps a linked list (`memoizedState`) of hook state, one
+entry per hook call, in call order. `useState(0)` doesn't "create"
+state each render — on mount it initializes one linked-list entry; on
+every subsequent render it walks to the *next* entry in that same
+list and returns whatever is currently stored there. This is the real
+mechanism behind "don't call hooks conditionally": hooks are matched
+to their stored state purely by call order/position, not by name — an
+`if` around a `useState` call would misalign every hook after it with
+the wrong stored slot.
+
+``` text
+Render 1: useState(0) → creates list node #1, value 0 → returns [0, setCount]
+Render 2: useState(0) → reads list node #1 (unchanged), value 5 → returns [5, setCount]
+```
+
+The `0` passed to `useState(0)` is only ever used on the *first*
+render — every subsequent render, React ignores the argument entirely
+and returns whatever is already in the slot.
+
+### Why setCount "Schedules" Instead of Updating Immediately
+
+If `setCount` mutated the DOM synchronously inside the event handler,
+calling it three times in one handler would cause three separate
+re-renders and three DOM writes for what is conceptually one user
+action. Instead, `setCount` marks the fiber as needing an update and
+*schedules* work; React batches every state update within the same
+event handler (or transition) into a single re-render, computed once
+the handler finishes. This is why reading `count` immediately after
+calling `setCount` in the same function still shows the old value —
+the update hasn't been applied yet, only queued.
+
+### Traced Example
+
+``` jsx
+function Counter() {
+  const [count, setCount] = useState(0);
+  const handleClick = () => {
+    setCount(count + 1);
+    console.log(count); // still logs the OLD value
+  };
+  return <button onClick={handleClick}>{count}</button>;
+}
+```
+
+`handleClick` is a closure created during *this* render, so `count`
+inside it is frozen at whatever value this render saw. `setCount`
+doesn't change that closure's `count` — it schedules a new render,
+which creates a brand-new `handleClick` closure with the updated
+`count` baked in.
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

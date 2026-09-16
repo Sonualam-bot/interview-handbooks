@@ -8,6 +8,66 @@ ones.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### Why Inheritance Fails For UI Specifically
+
+Class inheritance works well when subtypes are genuinely "is-a"
+specializations of one shared, stable interface (`Dog extends
+Animal`). UI components rarely fit that shape: a `Modal` isn't a
+specialized `Card`, and a `Card` isn't a specialized `Panel` — they
+*contain* each other, or sit beside each other, in different
+arrangements depending on the screen. Forcing that into inheritance
+means picking one rigid hierarchy upfront
+(`SpecialCard extends Card extends Panel`) that has to anticipate
+every future combination, and adding a new combination later often
+means restructuring the whole chain. Composition sidesteps the
+question entirely: nothing has to predict the hierarchy, because
+pieces are assembled at the call site, per use, not fixed at
+definition time.
+
+### children Is Just props, Which Is Just an Object
+
+The reason composition "just works" in React without a special
+templating/slot system is that it rides entirely on the mechanism
+already covered in Props notes: nested JSX becomes `props.children`,
+full stop. `<Card><Header/></Card>` and
+`<Layout header={<Header/>} />` are the *same trick* — passing an
+element as the value of a prop — just with `children` being the
+implicit, positional version of it. Composition isn't a separate
+React feature layered on top of props; it's props, applied to values
+that happen to be other elements.
+
+### Recursive Resolution, Why It Terminates
+
+``` text
+<Card><Header/></Card>
+  React executes Card(props) → Card returns <div>{props.children}</div>
+  → that's <div><Header/></div>
+  React executes Header(props) → Header returns <header>...</header>, which
+  contains only DOM element types (string types like "header", "div"), not
+  component types.
+```
+
+React keeps calling component functions on whatever they return, only
+stopping recursion at element types that are strings ("div",
+"header") — a string type has no further function to call; it's a
+direct instruction to create a real DOM node. Every component tree,
+no matter how deeply composed, bottoms out for this reason: the
+recursion is structurally guaranteed to end at native elements,
+because that's the only kind of element type React can't recurse into
+further.
+
+### Why "Prefer Composition" Isn't Anti-OOP Dogma
+
+React function components can't be meaningfully subclassed anyway
+(there's no instance to extend), so "prefer composition" isn't really
+a stylistic opinion — it's a description of the only mechanism that
+was actually available once components became functions returning
+element trees rather than class hierarchies.
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

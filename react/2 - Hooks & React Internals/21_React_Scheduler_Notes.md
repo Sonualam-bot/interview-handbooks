@@ -6,6 +6,50 @@ The Scheduler is part of React's rendering architecture that helps coordinate **
 
 > **Fiber represents the work; Scheduler coordinates when the work should happen.**
 
+## Deep Dive `[NEW]`
+
+### The Actual Problem: JavaScript Has No Preemption
+
+This is the piece conceptual explanations of the Scheduler usually
+skip, and it's the one that explains why a Scheduler has to exist at
+all: JavaScript is single-threaded and *run-to-completion* — once a
+function starts executing, nothing else (a click handler, a paint,
+another script) can run until it returns. There is no way for the
+browser, or React, to forcibly pause a running JS function midway and
+resume it later; a long-running function simply blocks everything
+else until it finishes. So "interruptible rendering" cannot mean
+actual OS-level preemption — it has to mean React's rendering code
+voluntarily stops itself, hands control back to the browser, and asks
+to be called again later. That voluntary stop-and-resume is the
+Scheduler's entire job.
+
+### How Yielding Actually Works
+
+React's Scheduler processes fiber tree work in small chunks and,
+after each chunk, checks "have I been running for about 5ms without
+yielding?" (`shouldYield()`). If so, instead of continuing
+synchronously, it schedules a callback to resume — historically via
+`setTimeout(0)`, and in modern implementations via a `MessageChannel`'s
+`postMessage`, because a posted-message callback runs as a new
+macrotask *after* the browser has had a chance to process pending
+input and paint, but sooner than a `setTimeout` (which browsers
+throttle and delay more aggressively). This is the concrete mechanism
+behind "pause / yield / resume" — not magic interruption, cooperative
+scheduling: do a bit of work, ask "should I stop?", and if yes,
+explicitly return control via a browser API built for exactly this
+purpose.
+
+### Why This Means Scheduling Can Never Guarantee Timing
+
+Because yielding is cooperative and dependent on the browser's own
+task queue, React can request "run this soon" but can never guarantee
+exactly when — if the main thread is busy with something else (a long
+synchronous script, a heavy layout), the scheduled continuation waits
+in line like any other macrotask. That's why the Scheduler is about
+*priority and coordination*, not real-time guarantees — it's built
+entirely on top of ordinary JS event-loop primitives, not any special
+access to the browser's internals.
+
 ## Why React Needs Scheduling
 
 Not all updates have the same urgency.

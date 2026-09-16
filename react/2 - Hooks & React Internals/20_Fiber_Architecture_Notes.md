@@ -8,6 +8,57 @@ A Fiber is an internal data structure representing a component or element in Rea
 
 > **Fiber does not mean multiple JavaScript threads. It gives React a unit-of-work model that makes rendering work more manageable, interruptible, and schedulable.**
 
+## Deep Dive `[NEW]`
+
+### Why a Linked Structure (child/sibling/return), Not an Array-Based Tree
+
+The `child`/`sibling`/`return` pointers aren't an arbitrary modeling
+choice — they're what makes Fiber's core trick possible: **replacing
+the JavaScript call stack with a data structure React controls.** A
+naive recursive renderer (`renderComponent` calling itself for every
+child) ties rendering progress to the real JS call stack — you cannot
+pause a call stack partway through and resume it later. By making
+`child`/`sibling`/`return` an explicit, external structure, React can
+implement "next unit of work" as a simple pointer-following loop that
+can stop after any single fiber and resume later from that exact
+fiber — because the "stack" now lives in a plain object graph on the
+heap, not in the actual call stack. This is the literal mechanism
+behind "Fiber makes rendering work interruptible" — not a metaphor,
+an actual replacement of recursion with iteration over an explicit
+tree.
+
+### Why Two Trees (Current + Work-in-Progress), Not One Mutated In Place
+
+If React mutated the single committed fiber tree directly while
+computing the next render, a paused/abandoned render would leave the
+*currently on-screen* tree half-updated — the user would see a broken
+UI even though nothing was ever committed. Keeping two separate trees
+(current, and a work-in-progress copy built via the `alternate`
+pointer) means all the "maybe this gets thrown away" work happens on
+a tree nobody is looking at. Only when work-in-progress is complete
+does React do a single pointer swap — `current = workInProgress` —
+making the switch to the new UI atomic from the outside. This is the
+same "double buffering" trick used in graphics rendering, applied to
+a data structure instead of pixels.
+
+### Traced Example: Reusing a Fiber vs Its `alternate`
+
+``` text
+Render 1: fiber F (Counter, count=0) — this becomes "current"
+setCount(1) is called
+Render 2: React creates/reuses F.alternate as the work-in-progress fiber
+          F.alternate.memoizedState = 1 (new count)
+          F.alternate.child = ... (newly reconciled children)
+Commit:   F.alternate becomes the new "current"; old F becomes the new
+          alternate, ready to be reused (not garbage) for the NEXT update.
+```
+
+The two fiber objects (F and F.alternate) are reused and swapped back
+and forth across renders rather than recreated every time — this is
+why Fiber, despite enabling frequent re-renders, doesn't allocate a
+brand-new tree of internal bookkeeping objects on every single
+update.
+
 ## Why Fiber Was Needed
 
 Large React trees can involve significant rendering work. Fiber lets React represent rendering as smaller units of work rather than treating the entire tree as one indivisible operation.

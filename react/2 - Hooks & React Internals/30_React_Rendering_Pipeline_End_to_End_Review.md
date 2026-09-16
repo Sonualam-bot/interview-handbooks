@@ -56,6 +56,54 @@ May be abandoned
 
 ---
 
+## Deep Dive `[NEW]`
+
+### The Same Counter Example, With Every Mechanism Named
+
+Every earlier chapter's "conceptual" diagram maps onto a real
+mechanism. Here is the exact chain, using the Counter example from
+Section 1 below, with the actual names attached:
+
+``` text
+1. Click → native DOM event → React's single root-level listener
+2. handleClick runs inside React's batching wrapper (automatic batching)
+3. setCount(count + 1) →
+     - creates an update object { action: 1 }
+     - appends it to Counter-fiber's pending update queue (a linked list)
+     - marks Counter-fiber's ancestors' lane bitmasks with the urgent lane
+     - asks the Scheduler to ensure the root is scheduled
+4. handleClick returns → batching wrapper flushes → Scheduler begins work
+5. Scheduler runs the work loop: walk child/sibling/return pointers on a
+   work-in-progress tree built via each fiber's `.alternate`, checking
+   shouldYield() (via MessageChannel-based timing) roughly every 5ms,
+   able to pause between fibers if something more urgent shows up
+6. Counter-fiber's work-in-progress is processed: its update queue is
+   walked, the update applied (0 + 1 = 1), Counter() re-executes with
+   count=1, returns a new React Element tree
+7. Reconciliation compares work-in-progress children against current
+   children using type/key heuristics, scoped to this parent only
+8. Once the whole work-in-progress tree is complete, Commit runs
+   synchronously: before-mutation → mutation (DOM writes) → layout
+   (useLayoutEffect) → current = work-in-progress (one atomic pointer swap)
+9. Browser paints the committed frame
+10. Scheduler separately schedules passive effects (useEffect) to run
+    after paint, each one's dependency array compared with Object.is
+```
+
+### Why This Level of Naming Matters
+
+Every one of the ten steps above was described in an earlier chapter
+using a conceptual diagram and the phrase "conceptually" or "this is a
+mental model, not the literal implementation." That hedging is
+honest — exact internal APIs shift between React versions — but it can
+leave the underlying mechanism feeling like a black box. The chain
+above is what closes that gap: an update queue (a real linked list per
+fiber), a lanes bitmask (a real integer), a scheduler built on a real
+browser API (`MessageChannel`), and a work-in-progress tree built from
+real `alternate` pointers are not metaphors — they're the actual
+pieces, and every "conceptual" arrow in this handbook corresponds to
+one of them.
+
 # 1. Start With a User Interaction
 
 Consider:

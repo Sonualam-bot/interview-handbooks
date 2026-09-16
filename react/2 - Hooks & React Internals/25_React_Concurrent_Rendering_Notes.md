@@ -24,6 +24,56 @@ React may also abandon rendering work if newer work makes it unnecessary.
 
 ---
 
+## Deep Dive `[NEW]`
+
+### Concurrent Rendering Is Built Entirely On Scheduler Yielding — There Is No Separate Mechanism
+
+Worth stating plainly, because conceptual diagrams can make
+"interruptible" sound like a distinct feature: concurrent rendering
+doesn't add a new capability underneath the render phase — it's the
+*product* of two things already covered separately in this handbook:
+the Scheduler's cooperative yielding and Fiber's external,
+pointer-based work representation that survives being paused.
+"Concurrent rendering" is the name for the emergent behavior you get
+when yieldable units of work (Fiber) are combined with a scheduler
+that can decide to run a *different, more urgent* unit of work before
+resuming the paused one — nothing more exotic is happening
+underneath.
+
+### Why Abandoning Work Is Safe: It Relies on Render's Purity, Not a Rollback Mechanism
+
+When React abandons an in-progress render, there's no explicit "undo"
+step — React doesn't reverse any writes, because a pure render was
+never supposed to write anything observable in the first place. The
+work-in-progress fiber tree being built is simply discarded,
+unreferenced, and garbage collected. This is why render purity
+(Strict Mode's whole reason for existing) isn't a style guideline for
+concurrent rendering specifically — it's the actual precondition that
+makes "just throw the half-finished work away" a safe operation at
+all. If render functions routinely mutated external state, abandoning
+a render would leave those mutations behind with nothing to undo
+them.
+
+### Traced Example: Why the User Never Sees a Half-Finished Tree
+
+``` text
+Render starts for a big list update (lower priority / transition)
+  → processes fiber 1..40 → yields → browser handles a keystroke
+  → keystroke triggers a NEW, higher-priority render (urgent lane)
+  → React starts the urgent render on a fresh/separate work-in-progress
+  → urgent render completes quickly → commits (current tree swap, atomic)
+  → the big list's original work-in-progress (fibers 1..40 built so far)
+    is still sitting there, unattached to "current" — React later resumes
+    or restarts it, walking the SAME work-in-progress tree structure
+```
+
+At no point is a tree that's half old-list/half new-list ever assigned
+to `current` — commit is still the same atomic pointer swap, regardless
+of how many times render was paused, abandoned, or restarted
+beforehand. "No partial UI" isn't a separate guarantee for concurrent
+mode — it's the ordinary current/work-in-progress split, just
+exercised more often.
+
 ## 1. The Problem Concurrent Rendering Solves
 
 Imagine a large rendering update:

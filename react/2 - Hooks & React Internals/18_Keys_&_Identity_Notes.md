@@ -8,6 +8,56 @@ reconciliation.
 Component state is associated with component identity, so changing
 identity can cause state to reset.
 
+## Deep Dive `[NEW]`
+
+### Every Element Has an Implicit Key, Whether You Write One or Not
+
+This is the detail that makes "same type + same position → same
+identity" precise instead of hand-wavy: when you don't pass an
+explicit `key`, React uses the element's **index within its parent's
+children** as its implicit key. That's not a separate rule from the
+explicit-key mechanism — it's the same mechanism, with React silently
+filling in the identity value for you. This is exactly why reordering
+an unkeyed list breaks state: the implicit key (the index) is
+precisely what changes when you reorder.
+
+### Why a Full Unmount/Remount, Not a Partial State Reset
+
+When identity changes, React doesn't try to salvage anything from the
+old instance — full unmount, full fresh mount. This looks aggressive,
+but it's the only safe option: React has no way to know which pieces
+of the old component's internal state (arbitrary `useState`/`useRef`/
+`useReducer` values, possibly holding timers, subscriptions, DOM
+node references) correspond to anything meaningful for a
+*conceptually different* entity. There is no generally safe way to
+"partially" carry state across an identity change, so React always
+does the conservative thing: run cleanup, destroy everything, then
+build fresh.
+
+### Traced Example: Why `key={userId}` Resets Everything, Not Just the Prop
+
+``` jsx
+function Profile({ userId }) {
+  const [tab, setTab] = useState('posts');   // unrelated to userId
+  useEffect(() => {
+    const sub = subscribe(userId);
+    return () => sub.cancel();
+  }, [userId]);
+  ...
+}
+
+<Profile key={userId} userId={userId} />
+```
+
+When `userId` changes, the `key` changes too → React treats this as a
+brand-new component identity → the *entire* fiber is discarded,
+including `tab`, even though `tab` had nothing to do with `userId`.
+That's the real trade-off of the "reset via key" pattern: it's a
+blunt instrument — everything resets, not just the state you wanted
+reset — which is exactly why it's reached for deliberately (to force
+a clean slate) rather than as a targeted fix for one specific piece
+of state.
+
 ## Core Mental Model
 
 ``` text

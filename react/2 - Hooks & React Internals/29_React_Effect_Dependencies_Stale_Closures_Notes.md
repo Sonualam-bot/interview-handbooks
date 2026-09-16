@@ -38,6 +38,57 @@ Run new effect
 
 ---
 
+## Deep Dive `[NEW]`
+
+### Why React Requires a Manual Dependency Array Instead of Auto-Tracking
+
+Frameworks like Vue or Svelte can auto-detect what a piece of
+reactive code "depends on" because they wrap your data in
+reactive proxies/signals that record every read. React deliberately
+doesn't do this — state and props in React are plain values (a
+number, a plain object), not tracked/proxied ones, specifically so
+`count` behaves like an ordinary JavaScript variable everywhere else
+in your code (no surprising proxy behavior, no restrictions on how you
+destructure or pass values around). The cost of that simplicity is
+that React has no automatic way to know "this effect read `count`" —
+so you declare it yourself in the dependency array. This is a genuine,
+acknowledged trade-off in React's design (simplicity/transparency of
+values vs. automatic dependency tracking), not an oversight — and it's
+exactly why the `eslint-plugin-react-hooks` "exhaustive-deps" rule
+exists: since React can't check this for you at runtime, static
+analysis of your source code is the closest available substitute.
+
+### The Comparison Is Object.is, Not ===, and That Difference Is Observable
+
+Dependency arrays are compared index-by-index using `Object.is`, not
+`===`. They agree for almost every value, but differ in two edge
+cases: `Object.is(NaN, NaN)` is `true` (while `NaN === NaN` is
+`false`), and `Object.is(0, -0)` is `false` (while `0 === -0` is
+`true`). Practically: if a dependency's value is legitimately `NaN`
+across renders, `Object.is` correctly treats it as "unchanged" (so the
+effect won't re-run every render just because comparing `NaN` the
+naive way would always say "different") — precisely why React chose
+`Object.is` over `===` for this comparison.
+
+### Traced Example: Why the Object/Array Identity Problem Has No "Automatic" Fix
+
+``` jsx
+useEffect(() => {
+  setup(options);
+}, [options]);   // options = { theme: "dark" }, recreated every render
+```
+
+There is no version of this where React could "know" that
+`{theme: "dark"}` this render is "the same" as `{theme: "dark"}` last
+render without either (a) deep-comparing every dependency on every
+render — expensive, and ambiguous for values containing functions or
+class instances — or (b) you doing the referential stabilization
+yourself (`useMemo`, or lifting the object out of the component).
+React chose to require (b) rather than default to (a), trading a small
+amount of developer diligence for avoiding a hidden, potentially very
+expensive deep-equality check running on every single render of every
+component using effects.
+
 # 1. Start With an Example
 
 ```jsx

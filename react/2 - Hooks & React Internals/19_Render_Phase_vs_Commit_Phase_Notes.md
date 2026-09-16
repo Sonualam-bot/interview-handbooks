@@ -17,6 +17,54 @@ Apply the required changes
 > **Render determines what the UI should look like. Commit applies the
 > necessary changes to the host environment, such as the browser DOM.**
 
+## Deep Dive `[NEW]`
+
+### Why Render Can Run Twice, But Commit Never Can
+
+This is the deepest reason the two phases are split at all. Render is
+pure calculation with no observable side effects (assuming purity is
+respected) — running it twice, or throwing away its result entirely,
+changes nothing the user can see. That's what makes it safe for React
+to restart or discard render work (Strict Mode's double-invocation in
+development exploits exactly this safety margin). Commit is the
+opposite: it's the phase that actually calls `appendChild`,
+`removeChild`, and similar DOM APIs — calls with real, unrepeatable
+side effects. You cannot "undo" an `appendChild` by simply not
+calling it again, and running it twice would visibly duplicate DOM
+nodes. That's why commit, unlike render, is never interrupted,
+restarted, or partially applied — the browser could paint a
+half-mutated DOM if commit yielded mid-way, producing a visibly
+broken frame.
+
+### Commit Itself Has Sub-Phases, For the Same Reason
+
+Commit is often described as one atomic step, but internally it's
+three: a **before-mutation** pass (captures things like scroll
+position before anything changes), a **mutation** pass (the actual
+DOM writes), and a **layout** pass (runs `useLayoutEffect`s and
+lifecycle methods like `componentDidMount`, synchronously, before the
+browser paints). All three run synchronously, back to back,
+specifically so the browser never paints a frame where the DOM has
+been mutated but layout-dependent code hasn't run yet — that would
+cause visible flicker. Passive effects (`useEffect`) are deliberately
+excluded from this synchronous block and scheduled separately, after
+paint, because most effects don't need to block the user from seeing
+the update.
+
+### Traced Example: What "Interruptible" Actually Buys You
+
+``` text
+Render fiber 1 → fiber 2 → fiber 3 → [~5ms budget used, yield to browser]
+   ↳ browser handles a pending click, paints if needed
+   ↳ resume: fiber 4 → fiber 5 → ... → done
+Commit: mutation pass (all at once) → layout pass (all at once) → paint
+```
+
+Render can be sliced into arbitrarily many yield points because
+nothing it does is visible yet. Commit cannot be sliced at all — once
+it starts, it runs to completion in one synchronous block, which is
+the literal meaning of "commit is not interruptible."
+
 ## 1. Render Phase
 
 During rendering, React performs work such as:

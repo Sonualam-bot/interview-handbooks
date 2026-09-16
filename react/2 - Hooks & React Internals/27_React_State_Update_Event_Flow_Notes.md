@@ -46,6 +46,40 @@ Browser rendering
 
 ---
 
+## Deep Dive `[NEW]`
+
+### What "setState Is a Request" Actually Means, Mechanically
+
+This chapter later says `setState` is "a request for an update" —
+here's the concrete mechanism that makes that true. Calling
+`setCount(next)` inside an event handler does three real things,
+synchronously, in order: (1) creates an update object carrying either
+the new value or an updater function; (2) appends it to that fiber's
+pending update queue (a linked list — see Batching chapter); (3) walks
+up from that fiber to the root, marking each ancestor's lane bitmask
+to say "this subtree has pending work" (see Lanes chapter), then asks
+the Scheduler to ensure the root gets rendered. None of this touches
+`count` itself — the local `count` binding inside the currently-
+executing closure is never mutated, which is the literal reason
+`console.log(count)` right after `setCount(...)` still shows the old
+value: there is no code path in `setState` that reaches back and
+rewrites a variable in a closure that already exists.
+
+### Why the Event Handler Finishing Is What Triggers the Batch to Flush
+
+React waits until the current event handler function returns before
+processing the queued updates because it's running inside a batching
+boundary (originally `unstable_batchedUpdates`, now the default per
+React 18) that wraps the entire native event dispatch. The queue only
+flushes once that wrapper's call finishes — exactly when the handler
+function returns control back to React's own event dispatch code.
+That's why synchronous code after multiple `setState` calls in one
+handler always sees pre-update values, but code in a `.then()` or
+`setTimeout` inside that same handler runs *outside* the wrapper, so
+it may trigger its own separate render depending on React version and
+what still falls inside the broader React 18 automatic-batching
+boundary.
+
 # 1. Example
 
 ```jsx

@@ -8,6 +8,50 @@ Element trees differ.
 
 React uses heuristics instead of a general-purpose tree comparison.
 
+## Deep Dive `[NEW]`
+
+### The Same Heuristic As Reconciliation, One Level Deeper: Why Not Just Ask "Are These Equal?"
+
+A generic deep-equality check between the old and new tree would need
+to recursively walk every node and compare every prop — and still
+wouldn't tell React *which* nodes to reuse when structure shifts
+(insertion, deletion, reordering). Equality checking answers "are
+these the same," a binary question; reconciliation needs to answer
+"which parts overlap, and how do the rest map," an alignment problem.
+That's why React never does a `JSON.stringify`-style comparison
+anywhere — it's the wrong kind of question. Structural/identity
+heuristics (type + key + position) are the cheap proxy React uses to
+answer the alignment question without full equality checking.
+
+### Why a Single Forward Pass, Not a Two-Pointer or LCS Diff
+
+A more thorough list-diffing approach (like the longest-common-
+subsequence algorithm `git diff` uses on text) would correctly find
+the true minimal set of moves for an arbitrarily reordered list.
+React deliberately doesn't do this — its list reconciliation is a
+single forward pass matching by key, plus a limited move-detection
+heuristic. Fast (O(n)), but degenerate reorderings (reversing a very
+long list) can be diagnosed as "many moves" rather than the true
+minimal set. In practice, key-stable lists rarely reorder in ways
+that justify the extra algorithmic cost of a proper LCS diff on every
+render.
+
+### Traced Example: Where the Heuristic Gets a "Wrong" Answer On Purpose
+
+``` text
+Old: <div><Header/><Sidebar/></div>
+New: <div><Sidebar/><Header/></div>   (no keys)
+```
+
+A human sees this as a swap — reuse both, only reorder. Without keys,
+React's per-index comparison sees: index 0 was `Header`, now
+`Sidebar` → different type → unmount Header, mount Sidebar. Index 1
+was `Sidebar`, now `Header` → different type → unmount Sidebar, mount
+Header. Both components remount with fresh state, even though nothing
+conceptually needed destroying — the algorithm intentionally never
+searches beyond "what's at this same index" without a key telling it
+to.
+
 ## Core Assumptions
 
 ### 1. Different element types produce different trees

@@ -28,6 +28,49 @@ Developer fixes the underlying code
 
 ---
 
+## Deep Dive `[NEW]`
+
+### Why Double-Invocation Specifically, Not Some Other Check
+
+Impurity bugs (mutating something outside the function, relying on
+execution order, using a module-level mutable variable) are, by
+nature, invisible when a function only ever runs once — the bug only
+becomes observable through repetition or reordering. React can't
+statically detect "this render function has a side effect" (that's an
+undecidable problem in general), so instead of analyzing your code,
+Strict Mode does the practical thing: run render (and mount effects)
+**twice in a row**, and let genuinely impure code betray itself by
+producing different output or double side effects the second time.
+This is a testing strategy, not an analysis strategy — Strict Mode
+doesn't know your code is impure; it makes impurity more likely to be
+*observed* by exercising the exact failure mode (repetition) that
+concurrent rendering will eventually rely on.
+
+### Why This Specifically Anticipates Concurrent Rendering
+
+Concurrent rendering can render a component, throw the result away
+(an abandoned render), and render it again later. If that component's
+render function had a side effect (mutating a shared variable,
+pushing to an array outside the component), the abandoned render's
+side effect already happened and won't be undone just because React
+discarded the render's *output*. Strict Mode's double-invocation in
+development is a deliberate stress test for exactly this future
+reality — cheaper to catch "this breaks if rendered twice" during
+development with an obvious console warning than to have it manifest
+as a rare, hard-to-reproduce bug in production under concurrent
+rendering, months after the code shipped.
+
+### Why Effects Are Also Double-Invoked (Mount → Cleanup → Mount)
+
+The same logic extends past render: Strict Mode also runs `useEffect`
+setup, then its cleanup, then setup again, on mount. This specifically
+targets effects that forget cleanup or assume "setup only runs once
+ever" — a subscription not unsubscribed in the cleanup function will
+visibly double-subscribe under this stress test, surfacing a real
+production bug (leaked subscriptions across remounts, common with fast
+refresh or navigating away and back) that would otherwise only show up
+as a slow memory/listener leak over time.
+
 ## 1. Why Strict Mode Exists
 
 React's modern rendering architecture means developers should not assume that rendering logic executes exactly once.

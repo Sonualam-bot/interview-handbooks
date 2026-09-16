@@ -8,6 +8,56 @@ renders the result.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### There's No Such Thing As "React's Conditional Syntax"
+
+This is the single most important thing to internalize about this
+topic: React has no `if`/`else` construct of its own.
+`{condition ? <A/> : <B/>}` works purely because JSX embeds
+*JavaScript expressions* inside `{}` (see JSX notes: expressions, not
+statements), and the ternary is a JavaScript expression that
+evaluates to one value. `if` doesn't work inline because `if` is a
+*statement* — it doesn't evaluate to a value that can sit inside `{}`.
+That's exactly why `if` has to be pulled out above `return`, as a
+statement, while the ternary, `&&`, and function calls all work
+inline.
+
+### The && Footgun, Explained From First Principles
+
+`isAdmin && <AdminPanel />` relies on JavaScript's `&&` short-circuit:
+if the left side is falsy, the expression evaluates to the left
+side's *value*, not `false` specifically. This matters:
+
+``` jsx
+{count && <Badge count={count} />}
+```
+
+If `count` is `0`, `0 && <Badge />` evaluates to `0` — not `false`.
+React renders `false`, `null`, `undefined`, and `true` as nothing, but
+`0` is a valid, renderable value — so React prints a literal `0` on
+the page. The fix, `{count > 0 && <Badge />}`, works because the left
+side is now always a real boolean, never a number. This isn't a React
+quirk to memorize as a "gotcha" — it's a direct consequence of
+JavaScript's `&&` semantics combined with React's "falsy renders
+nothing, but numbers are content" rule.
+
+### Traced Example
+
+``` text
+loading = true
+  ↓ JS evaluates: loading ? <Spinner/> : <Dashboard/>  →  <Spinner/> element
+  ↓ React receives one element, builds that subtree
+
+loading becomes false (via setLoading)
+  ↓ component re-executes
+  ↓ JS evaluates the same ternary → <Dashboard/> element
+  ↓ different element type at this position → React discards the Spinner
+    subtree, mounts Dashboard fresh (see Virtual DOM: different type = rebuild)
+```
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

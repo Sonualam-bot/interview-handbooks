@@ -35,6 +35,42 @@ Effect
 
 ---
 
+## Deep Dive `[NEW]`
+
+### Why useEffect Doesn't Block Paint, and useLayoutEffect Does
+
+This is the mechanical answer underneath the "Effect Timing Mental
+Model" covered later. Passive effects (`useEffect`) are scheduled
+through the same Scheduler used for everything else in this handbook
+— after commit finishes, React schedules the passive-effect flush as
+a separate, yieldable unit of work, deliberately giving the browser a
+chance to paint the just-committed DOM changes *before* your effect
+callbacks run. Layout effects (`useLayoutEffect`) are the opposite on
+purpose: they run synchronously inside the commit phase's layout
+sub-pass, before the browser has painted anything from this commit.
+The trade-off is direct: `useLayoutEffect` can safely read a DOM
+measurement and synchronously write a state update that changes the
+DOM again before the user ever sees the first, unmeasured frame (no
+flicker) — but it blocks paint while it runs, so using it for anything
+slow (a network call, heavy computation) makes the whole page visibly
+stutter. `useEffect` never blocks paint, but by the time it runs, the
+user may already have seen one frame of the "unadjusted" UI.
+
+### Why Cleanup Runs Before the *Next* Effect, Not Just on Unmount
+
+The "Effect Lifecycle" section later shows cleanup happening both
+before a new effect and on unmount — the mechanical reason both are
+the same code path is that React treats "dependencies changed" and
+"component unmounting" identically from the effect's perspective:
+both mean "this synchronization is no longer valid, tear it down."
+Concretely, on every commit where a dependency changed, React runs
+last render's cleanup function *before* running this render's new
+effect function — never both effects active at once. This is what
+prevents, e.g., two overlapping WebSocket connections when `roomId`
+changes rapidly: the old room's connection is always closed before the
+new room's connection opens, because cleanup-then-setup is one atomic
+step from React's point of view, not "maybe cleanup eventually."
+
 ## 1. What Is a Side Effect?
 
 A side effect is work that interacts with something outside the component's pure rendering calculation.

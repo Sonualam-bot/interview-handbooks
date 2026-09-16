@@ -26,6 +26,56 @@ startTransition(...)
 
 ---
 
+## Deep Dive `[NEW]`
+
+### Why Bitmasks Specifically, Not a Priority Number or a Sorted Queue
+
+A single "priority number" per update can express *one* ordering, but
+React frequently needs to ask compound questions like "does this
+fiber have *any* pending work at either urgent priority OR this
+specific transition's priority, but not others?" across potentially
+many simultaneously-pending update types. Representing each lane as
+one bit in an integer turns those questions into single, extremely
+cheap bitwise operations: checking overlap is
+`pendingLanes & lanesToCheck`, merging two sets of pending work is
+`laneA | laneB`, removing finished work is
+`pendingLanes & ~completedLanes`. A sorted queue or priority-number
+comparison can't answer "is any of this specific combination of
+concerns pending" in one O(1) operation — you'd need to scan. Bitwise
+operations on a plain integer are about as cheap as a runtime
+operation gets, which matters because this check happens on every
+scheduling decision.
+
+### Why This Buys More Than "High vs Low"
+
+Because lanes are a set (via bits), not a single scalar, React can
+track *multiple independent, simultaneously pending updates at
+different priorities on the same fiber* — e.g. an urgent input update
+and a separate lower-priority transition update to the same
+component, pending at the same time, without one overwriting the
+other's priority tag. A single priority field per fiber couldn't
+represent "this fiber has both urgent work AND separate transition
+work outstanding right now" — it could only hold one value. This is
+the concrete reason lanes exist as a bitmask model rather than the
+simpler "priority: high/low" shortcut the rest of this chapter uses
+for interview purposes.
+
+### Traced Example
+
+``` text
+Lane for urgent (click/typing) updates:      0b0001
+Lane for a startTransition update:            0b0100
+
+Both pending on the same fiber simultaneously:
+  pendingLanes = 0b0001 | 0b0100 = 0b0101
+
+React asks "is urgent work pending?": 0b0101 & 0b0001 = 0b0001 → yes, handle first
+After urgent work commits: pendingLanes = 0b0101 & ~0b0001 = 0b0100 → transition left
+```
+
+No scanning, no sorting — just integer bitwise arithmetic to track and
+query an arbitrary combination of pending priorities on every fiber.
+
 ## 1. Why React Needs Priorities
 
 Not every update is equally urgent.

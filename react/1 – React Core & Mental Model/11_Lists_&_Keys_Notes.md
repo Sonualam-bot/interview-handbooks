@@ -7,6 +7,62 @@ stable identity for component instances during reconciliation.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### Why React Needs Keys At All (Not Just "Best Practice")
+
+Every render, `.map()` produces a *brand-new array of brand-new
+element objects* — even if the underlying data is identical, the
+objects are not `===` to last render's objects (see React Elements:
+elements are recreated, never mutated). Without any other
+information, reconciling a list has only one way to match old
+elements to new ones: **position in the array**. Position-based
+matching is a *guess* — it assumes "whatever's at index 2 now
+corresponds to whatever was at index 2 before," which is only true if
+nothing was ever inserted, removed, or reordered.
+
+`key` replaces that guess with an actual identity claim: "this
+element, wherever it ends up, is the same conceptual thing as the
+element that had this key last time." That's the entire purpose — not
+a syntax requirement, but how React avoids a wrong guess about
+identity.
+
+### Why Wrong Guesses Are Dangerous, Concretely
+
+Component instances (fiber nodes) hold state that's independent of
+props (see State notes). If React wrongly matches "new index-2
+element" to "old index-2 fiber" after an item was inserted at index
+0, it reuses that fiber's *existing state* (a checkbox's checked
+state, an input's typed text, a CSS transition's in-progress value)
+for what is now conceptually a *different* list item. The DOM node's
+identity doesn't change, so anything living in that node's
+uncontrolled state (or on the fiber) sticks around and gets displayed
+for the wrong data — the actual mechanism behind "wrong checkbox
+selected" / "lost input focus," not just an observed symptom.
+
+### Traced Example
+
+``` text
+Before: [A(key=1), B(key=2), C(key=3)]  → fibers: F1↔A, F2↔B, F3↔C
+Insert X at front:
+After:  [X(key=4), A(key=1), B(key=2), C(key=3)]
+
+Keyed reconciliation:
+  key=4 is new         → create new fiber F4
+  key=1 matches F1     → reuse F1 (and its state) for A, now at index 1
+  key=2 matches F2     → reuse F2 for B
+  key=3 matches F3     → reuse F3 for C
+Result: only one new fiber created; A/B/C keep their state exactly.
+
+Index-based (no keys, or index-as-key):
+  index 0 = X (was A)  → React thinks "A" turned into "X", reuses F1's state for X
+  index 1 = A (was B)  → reuses F2's state for A
+  ...
+Result: every item after the insertion point silently inherits the wrong state.
+```
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

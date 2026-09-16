@@ -9,6 +9,61 @@ The difference is **who owns the source of truth**.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### The Actual Trade-off, Not Just "Who Owns It"
+
+Every re-render triggered by a controlled input costs something:
+React runs the component function, diffs, and commits — for every
+keystroke, of a form that might have thirty fields. For most UIs this
+is fast enough to be free, but not literally free. That's *why*
+uncontrolled components are a real option, not a legacy pattern: for
+very large forms, for third-party non-React widgets that expect to own
+their own DOM state (a canvas library, a map widget), or for values
+you only need to *read once* (e.g. on submit) rather than track
+continuously, paying a re-render per keystroke to keep React's state
+in sync is pure overhead with no benefit — React never needed to know
+the value until the very end.
+
+### Why ref, Specifically
+
+A `ref` (`useRef`) gives a stable handle to the actual DOM node
+without asking React to track its value as state (state is what
+triggers re-renders — see State notes; a ref changing does not).
+Reading `inputRef.current.value` at submit time asks the DOM directly
+for whatever the browser has been holding onto the whole time — the
+DOM was always the source of truth, React just never bothered to ask
+until it needed the value.
+
+### Traced Comparison
+
+``` text
+Controlled:
+  keystroke → onChange → setState → re-render → React writes value prop back to DOM
+  (DOM value is always a reflection of React state)
+
+Uncontrolled:
+  keystroke → browser updates its own internal input value directly
+  (React does nothing — no event handler even required)
+  ...later, on submit:
+  handleSubmit → reads inputRef.current.value → gets whatever the DOM currently holds
+```
+
+Nothing computed the uncontrolled input's value on every keystroke —
+native browser input behavior did all of that work for free, which is
+exactly the performance case for choosing it.
+
+### Why File Inputs Must Be Uncontrolled
+
+`<input type="file">`'s value is a `FileList` the browser controls for
+security reasons (JavaScript cannot programmatically set what file a
+user "selected"). Since React can never legally write a `value` back
+into a file input, controlling it is structurally impossible — you
+can only read via `ref`, making this the one input type that's
+uncontrolled by necessity, not preference.
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text

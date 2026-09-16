@@ -18,6 +18,43 @@ Commit
 
 > **Batching groups updates together; it does not mean parallel execution.**
 
+## Deep Dive `[NEW]`
+
+### The Actual Data Structure Behind "Batching"
+
+Each fiber that owns state (via `useState`/`useReducer`) has its own
+**update queue** — conceptually a small linked list of pending
+updates for that fiber. Calling `setCount(x)` doesn't recompute
+anything immediately; it appends an update object (`{ action: x }`,
+or `{ action: fn }` for functional updates) to that fiber's queue and
+marks the fiber's ancestors as having pending work, then asks the
+Scheduler to ensure a render happens. When React later processes that
+fiber during render, it walks the entire queue front-to-back,
+applying each update in order to compute the final state — which is
+exactly why `setCount(c => c+1)` called three times produces three
+sequential applications (0→1→2→3), while `setCount(count+1)` called
+three times just enqueues the same "become 1" instruction three
+times: they're not being "overwritten," each is independently
+computing `count+1` from the same stale `count` closure.
+
+### Why React 18 Needed an Architecture Change for "Automatic" Batching
+
+Before React 18, batching only happened inside React-owned event
+handlers (click, change, etc.) — because those were the only places
+React had already wrapped in `unstable_batchedUpdates()`, a function
+that set an internal flag telling the update queue "don't flush yet,
+more updates might come in this tick." Code running inside a
+`setTimeout`, a native `addEventListener`, or a resolved `Promise`
+wasn't inside that wrapped call, so each `setState` there flushed and
+re-rendered individually. React 18's automatic batching isn't a
+smarter heuristic — it moved the batching boundary from "inside
+React's own event handler wrapper" to "for the whole duration of a
+microtask/macrotask, regardless of who started it," using the same
+underlying update-queue mechanism, just triggered more consistently.
+That's why the change shipped as an architectural update (tied to
+`createRoot`), not a tuning knob — it changed *where* the batching
+boundary is drawn, not how batching itself works.
+
 ## 1. Why Batching Is Useful
 
 Without batching:

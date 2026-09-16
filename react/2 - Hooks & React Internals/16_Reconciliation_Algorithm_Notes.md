@@ -8,6 +8,49 @@ preserved.
 
 The resulting changes are applied during the Commit phase.
 
+## Deep Dive `[NEW]`
+
+### Why O(n) Heuristics, Not an Optimal Diff
+
+A mathematically optimal general tree-diff (classic tree-edit-distance)
+is O(n³) in the number of nodes — computationally infeasible to run on
+every keystroke for a UI with even a few thousand elements. React's
+reconciler trades optimality for speed by committing to two
+assumptions true for the overwhelming majority of real UIs: (1)
+elements of different types almost never produce similar subtrees, so
+there's no value in searching for partial overlap between them; (2) a
+key-based match beats computing the true minimal edit for lists.
+Together these bring the algorithm down to O(n) — one pass per tree
+level — at the cost of occasionally doing more work than a perfect
+diff would. This is a documented, deliberate trade-off, not an
+oversight.
+
+### Reconciliation Never Detects Cross-Level Moves
+
+The heuristic only matches siblings against siblings, at the same
+level, under the same parent. Move a component to a *different
+parent* — even the same element, same key, same props — and React
+does not detect "this moved." It sees the old position lose an
+element (unmount) and the new position gain one (mount), because
+reconciliation only ever compares "children of this fiber" against
+"children of this same fiber," never the whole tree.
+
+``` jsx
+// Before
+<div className="a"><Counter key="c" /></div>
+<div className="b"></div>
+
+// After — Counter "moved" into the second div
+<div className="a"></div>
+<div className="b"><Counter key="c" /></div>
+```
+
+Despite the identical key, `Counter` unmounts and remounts with fresh
+state — reconciliation is scoped per-parent, not global. That's the
+direct, practical consequence of the O(n) design decision above: a
+global search for matches across the whole tree is exactly the
+expensive operation the heuristic exists to avoid.
+
 ## Mental Model
 
 ``` text

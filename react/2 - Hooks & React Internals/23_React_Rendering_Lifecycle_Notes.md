@@ -30,6 +30,44 @@ State / Props / Context change
 
 This is a mental model, not a literal internal call stack.
 
+## Deep Dive `[NEW]`
+
+### This Chapter's Diagram Is a Simplification of a Double-Buffered, Queue-Driven Process
+
+Every arrow in the pipeline above corresponds to a concrete mechanism
+covered elsewhere in this handbook, and naming them together is what
+turns the diagram from a mnemonic into an actual model:
+
+-   "Update scheduled" = an update object appended to a fiber's update
+    queue, with ancestors marked as having pending work (see Batching).
+-   "Render phase" = the Scheduler repeatedly picks the next unit of
+    work by walking `child`/`sibling`/`return` pointers on a
+    *work-in-progress* fiber tree built via each fiber's `alternate`,
+    yielding back to the browser roughly every 5ms if needed (see
+    Fiber, Scheduler).
+-   "Reconciliation" = comparing work-in-progress children against
+    current-tree children using type/key heuristics, one parent's
+    children at a time — never a global tree search (see
+    Reconciliation, Diffing).
+-   "Commit phase" = a synchronous, non-yielding block
+    (before-mutation → mutation → layout sub-passes) that flips the
+    current-tree pointer to the finished work-in-progress tree in one
+    atomic swap (see Render vs Commit, Fiber).
+
+### Why "Not a Literal Call Stack" Matters
+
+The actual work loop is not nested function calls mirroring the
+diagram — it's a `while (workInProgress !== null)` loop in React's
+source repeatedly calling `performUnitOfWork`, checking
+`shouldYield()` between iterations. There's no call-stack frame for
+"Render Phase" that "calls into" Reconciliation which "calls into"
+Diffing — those are conceptual groupings of what one flat work loop is
+doing at different fibers, not literal nested calls. This matters
+practically: it's why rendering can be paused between any two fibers,
+but never mid-way through processing a single fiber — the loop only
+checks whether to yield at fiber boundaries, not inside the work done
+for one fiber.
+
 ## 1. Initial Render vs Update Render
 
 ### Initial render

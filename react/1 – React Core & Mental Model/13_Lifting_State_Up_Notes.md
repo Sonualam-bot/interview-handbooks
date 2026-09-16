@@ -8,6 +8,57 @@ truth.
 
 ------------------------------------------------------------------------
 
+## Deep Dive `[NEW]`
+
+### Why Siblings Can't Just Talk To Each Other
+
+Component state lives on a fiber, and a fiber only exposes its state
+through the props it hands to its *own children* (one-way data flow,
+see Props notes). Two sibling fibers have no reference to each
+other at all — `SearchBar`'s fiber doesn't know `ProductList`'s fiber
+exists. The only node with a reference to both is their common
+parent, because it's the one that rendered both of them. So "shared
+state must live in a common ancestor" isn't a guideline to follow —
+it's a direct consequence of how data can physically flow through the
+fiber tree: down through props, never sideways.
+
+### Why Not Just Duplicate the State in Both Components?
+
+If `SearchBar` and `ProductList` each kept their own local `query`
+state, there would be two independent sources of truth that must be
+kept manually in sync — precisely the "state/DOM drift" problem
+React's whole render model exists to eliminate (see What is React),
+recreated one level up, between two pieces of component state instead
+of between state and DOM. Lifting state up applies the same
+single-source-of-truth principle that motivates `UI = f(state)` in
+the first place, at the granularity of a subtree instead of the whole
+app.
+
+### Traced Example
+
+``` text
+App (owns query, setQuery)
+├── SearchBar(query, onQueryChange)     — receives query via props, calls
+│                                          onQueryChange(newValue) on input
+└── ProductList(query)                  — receives the SAME query via props,
+                                           filters by it
+
+User types in SearchBar's input
+  → SearchBar calls onQueryChange("phone")   (a prop function, defined in
+                                               App, passed down)
+  → that prop function is literally App's setQuery
+  → App's state updates → App re-renders
+  → App passes query="phone" to BOTH children again
+  → SearchBar shows "phone" in the input (controlled), ProductList re-filters
+```
+
+`onQueryChange` is not a special mechanism — it's an ordinary prop (a
+callback function) passed down, the *only* tool a component has for
+triggering a change in an ancestor's state: call a function the
+ancestor gave you.
+
+------------------------------------------------------------------------
+
 ## Mental Model
 
 ``` text
